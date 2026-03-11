@@ -20,7 +20,7 @@
                     runtime: cel@v0
                     code: '''
                         predicates.exists(p,
-                            p.data.buildDefinition.externalParameters.source.ref == "refs/heads/main"
+                            p.data.buildDefinition.externalParameters.git.ref == "refs/heads/main"
                         )
                     '''
 
