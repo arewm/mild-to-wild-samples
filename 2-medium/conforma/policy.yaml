@@ -6,7 +6,7 @@
 # Usage:
 #   ec validate image \
 #     --image <IMAGE_REF> \
-#     --policy medium/conforma/policy.yaml
+#     --policy 2-medium/conforma/policy.yaml
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: EnterpriseContractPolicy
 metadata:
@@ -19,8 +19,8 @@ spec:
     - name: Medium Checks
       policy:
         - oci::quay.io/conforma/release-policy:latest
-        - github.com/arewm/mild-to-wild-samples//mild/conforma?ref=main
-        - github.com/arewm/mild-to-wild-samples//medium/conforma?ref=main
+        - github.com/arewm/mild-to-wild-samples//1-mild/conforma?ref=main
+        - github.com/arewm/mild-to-wild-samples//2-medium/conforma?ref=main
       ruleData:
         allowed_gh_workflow_repos:
           - "my-org/my-repo"

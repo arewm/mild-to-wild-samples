@@ -10,7 +10,7 @@
 # Usage:
 #   ec validate image \
 #     --image <IMAGE_REF> \
-#     --policy mild/conforma/policy.yaml
+#     --policy 1-mild/conforma/policy.yaml
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: EnterpriseContractPolicy
 metadata:
@@ -26,7 +26,7 @@ spec:
         # (workflow repository, ref, trigger) from GitHub Actions Sigstore signing.
         - oci::quay.io/conforma/release-policy:latest
         # Our custom mild rules: provenance present + VSA SLSA level
-        - github.com/arewm/mild-to-wild-samples//mild/conforma?ref=main
+        - github.com/arewm/mild-to-wild-samples//1-mild/conforma?ref=main
       ruleData:
         # Restrict which GitHub repos are allowed to sign artifacts
         allowed_gh_workflow_repos:

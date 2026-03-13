@@ -8,9 +8,9 @@ enforcement with two interchangeable policy engines.
 
 | Level | What it checks | Directory |
 |-------|---------------|-----------|
-| **Mild** | Attestation presence, signer identity, SLSA level | [`mild/`](mild/) |
-| **Medium** | Provenance content inspection, multi-attestation evaluation, VSA/SVR production | [`medium/`](medium/) |
-| **Wild** | Trusted task bundle digests in Tekton provenance | [`wild/`](wild/) |
+| **Mild** | Attestation presence, signer identity, SLSA level | [`1-mild/`](1-mild/) |
+| **Medium** | Provenance content inspection, multi-attestation evaluation, VSA/SVR production | [`2-medium/`](2-medium/) |
+| **Wild** | Trusted task bundle digests in Tekton provenance | [`3-wild/`](3-wild/) |
 
 Each level contains policies for both engines:
 

@@ -44,7 +44,14 @@ run_test() {
         paths+=("${CONFORMA_POLICY_PATH}/policy/release/github_certificate")
     fi
 
-    paths+=("${SCRIPT_DIR}/${level}/conforma/")
+    # Map level name to directory name
+    local dir_map_mild="1-mild"
+    local dir_map_medium="2-medium"
+    local dir_map_wild="3-wild"
+    local dir_var="dir_map_${level}"
+    local dir="${!dir_var}"
+
+    paths+=("${SCRIPT_DIR}/${dir}/conforma/")
 
     "${EC_BIN}" opa test "${paths[@]}" -v
 }

@@ -7,7 +7,7 @@
 # Usage:
 #   ec validate image \
 #     --image <IMAGE_REF> \
-#     --policy wild/conforma/policy.yaml
+#     --policy 3-wild/conforma/policy.yaml
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: EnterpriseContractPolicy
 metadata:
@@ -22,9 +22,9 @@ spec:
     - name: Wild Checks
       policy:
         - oci::quay.io/conforma/release-policy:latest
-        - github.com/arewm/mild-to-wild-samples//mild/conforma?ref=main
-        - github.com/arewm/mild-to-wild-samples//medium/conforma?ref=main
-        - github.com/arewm/mild-to-wild-samples//wild/conforma?ref=main
+        - github.com/arewm/mild-to-wild-samples//1-mild/conforma?ref=main
+        - github.com/arewm/mild-to-wild-samples//2-medium/conforma?ref=main
+        - github.com/arewm/mild-to-wild-samples//3-wild/conforma?ref=main
       data:
         # Trusted task bundle data -- lists approved Tekton task bundles
         - oci::quay.io/konflux-ci/tekton-catalog/data-acceptable-bundles:latest
