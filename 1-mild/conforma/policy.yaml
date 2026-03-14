@@ -32,7 +32,6 @@ spec:
         # Accepted builder IDs for SLSA provenance
         allowed_builder_ids:
           - "https://github.com/arewm/mild-to-wild-samples/tekton-build"
-          - "https://tekton.dev/chains/v2"
         # Accepted build types
         allowed_build_types:
           - "https://tekton.dev/chains/v2/slsa"

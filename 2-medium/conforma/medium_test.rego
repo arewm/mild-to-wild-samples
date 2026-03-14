@@ -61,14 +61,14 @@ _mock_provenance(git_ref) := {"statement": {
 	"predicateType": "https://slsa.dev/provenance/v1",
 	"predicate": {
 		"buildDefinition": {
-			"buildType": "https://tekton.dev/chains/v2/slsa-tekton",
+			"buildType": "https://tekton.dev/chains/v2/slsa",
 			"externalParameters": {
 				"git": {"ref": git_ref},
 				"runSpec": {"pipelineSpec": {}},
 			},
 		},
 		"runDetails": {
-			"builder": {"id": "https://tekton.dev/chains/v2"},
+			"builder": {"id": "https://github.com/arewm/mild-to-wild-samples/tekton-build"},
 			"metadata": {"buildFinishedOn": "2024-01-01T00:00:00Z"},
 		},
 	},

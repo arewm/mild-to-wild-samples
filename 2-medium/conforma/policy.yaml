@@ -24,7 +24,6 @@ spec:
       ruleData:
         allowed_builder_ids:
           - "https://github.com/arewm/mild-to-wild-samples/tekton-build"
-          - "https://tekton.dev/chains/v2"
         allowed_build_types:
           - "https://tekton.dev/chains/v2/slsa"
       config:
