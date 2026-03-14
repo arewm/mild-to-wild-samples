@@ -1,7 +1,7 @@
 # Sample EnterpriseContractPolicy for the Medium level.
 #
-# Builds on Mild by adding provenance content inspection and SBOM checks.
-# Uses standard SLSA v1.0 provenance fields (builder-agnostic).
+# Same SLSA checks as Wild, but without trusted task verification.
+# This produces a VSA at SLSA Build Level 2.
 #
 # Usage:
 #   ec validate image \
@@ -14,14 +14,13 @@ metadata:
   name: medium-policy
 spec:
   description: >-
-    Medium level: provenance content inspection, SBOM presence,
-    and VSA/SVR production for downstream enforcement.
+    Medium level: SLSA provenance checks without trusted task
+    verification. Produces a VSA at SLSA Build Level 2.
   sources:
     - name: Medium Checks
       policy:
         - oci::quay.io/conforma/release-policy:latest
         - github.com/arewm/mild-to-wild-samples//1-mild/conforma?ref=main
-        - github.com/arewm/mild-to-wild-samples//2-medium/conforma?ref=main
       ruleData:
         allowed_builder_ids:
           - "https://github.com/arewm/mild-to-wild-samples/tekton-build"
@@ -39,6 +38,3 @@ spec:
           - slsa_source_version_controlled.materials_uri_is_git_repo
           - slsa_source_version_controlled.materials_include_git_sha
           - external_parameters.restrict_shared_volumes
-          # Medium rules
-          - medium.trusted_source_branch
-          - medium.sbom_present

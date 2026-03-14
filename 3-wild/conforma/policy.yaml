@@ -23,7 +23,6 @@ spec:
       policy:
         - oci::quay.io/conforma/release-policy:latest
         - github.com/arewm/mild-to-wild-samples//1-mild/conforma?ref=main
-        - github.com/arewm/mild-to-wild-samples//2-medium/conforma?ref=main
         - github.com/arewm/mild-to-wild-samples//3-wild/conforma?ref=main
       data:
         # Trusted task bundle data for PipelineRun provenance
@@ -47,9 +46,6 @@ spec:
           - slsa_source_version_controlled.materials_uri_is_git_repo
           - slsa_source_version_controlled.materials_include_git_sha
           - external_parameters.restrict_shared_volumes
-          # Medium rules
-          - medium.trusted_source_branch
-          - medium.sbom_present
           # Wild rules
           - wild.all_tasks_trusted
           - wild.pipelinerun_provenance_for_trusted_tasks

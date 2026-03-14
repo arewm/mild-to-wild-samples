@@ -9,7 +9,7 @@ enforcement with two interchangeable policy engines.
 | Level | What it checks | Directory |
 |-------|---------------|-----------|
 | **Mild** | Provenance presence, build type, builder identity, source materials, external parameters | [`1-mild/`](1-mild/) |
-| **Medium** | Source branch, SBOM presence, VSA production | [`2-medium/`](2-medium/) |
+| **Medium** | Same SLSA checks as Mild, produces a VSA at Build Level 2 | [`2-medium/`](2-medium/) |
 | **Wild** | Trusted task verification (PipelineRun and TaskRun provenance) | [`3-wild/`](3-wild/) |
 
 Each level contains policies for both engines:
@@ -19,23 +19,9 @@ Each level contains policies for both engines:
 
 ## Testing (Conforma policies)
 
-The Conforma policies have OPA tests that run with `ec opa test`. The test
-runner needs the Conforma CLI and the upstream policy library (which provides
-`data.lib` helpers, attestation filtering, Tekton task helpers, etc.).
+The Conforma policies have OPA tests that run with `ec opa test`. You'll need the Conforma CLI and the upstream policy library cloned locally (it provides `data.lib` helpers, attestation filtering, and Tekton task utilities). Standard `opa` won't work because the tests depend on `ec`-specific OPA extensions.
 
-**Prerequisites:**
-
-1. The [Conforma CLI](https://github.com/enterprise-contract/ec-cli) (`ec`
-   binary). Standard `opa` will not work -- the tests depend on `ec`-specific
-   OPA extensions.
-2. The [Conforma policy library](https://github.com/conforma/policy) cloned
-   locally. Tests load `policy/lib/` and `policy/release/lib/` from this repo.
-
-**Running tests:**
-
-The `test_policy.sh` script locates both dependencies via environment variables.
-By default it looks for sibling directories named `conforma-cli` and
-`conforma-policy`:
+The `test_policy.sh` script locates both dependencies via environment variables and defaults to looking for sibling directories named `conforma-cli` and `conforma-policy`:
 
 ```bash
 # If repos are sibling directories (the default), just run:
@@ -54,17 +40,9 @@ export CONFORMA_CLI_PATH=/path/to/conforma-cli
 
 ## Building images (Wild level)
 
-The `3-wild/tekton/` directory includes tasks for building and verifying images with
-SLSA v1.0 provenance. Builds use the git resolver to reference tasks, enabling trusted
-task verification.
+The `3-wild/tekton/` directory includes tasks for building and verifying images with SLSA v1.0 provenance. Builds use the git resolver to reference tasks, enabling trusted task verification. You'll need KinD (or any Kubernetes cluster), kubectl, and cosign.
 
-**Prerequisites:**
-
-- KinD (or any Kubernetes cluster)
-- kubectl
-- cosign
-
-**Cluster setup:**
+### Cluster setup
 
 ```bash
 # Create KinD cluster (set KIND_EXPERIMENTAL_PROVIDER to match your runtime)
@@ -80,11 +58,9 @@ kubectl apply -f https://storage.googleapis.com/tekton-releases/chains/latest/re
 kubectl wait -n tekton-chains --for=condition=ready pod -l app.kubernetes.io/part-of=tekton-chains --timeout=300s
 ```
 
-**Generate key pairs:**
+### Generate key pairs
 
-Two separate cosign key pairs are needed:
-- **Provenance signing** (for Tekton Chains)
-- **VSA signing** (for verify-and-attest task)
+You'll need two separate cosign key pairs: one for provenance signing (Tekton Chains) and one for VSA signing (verify-and-attest task).
 
 ```bash
 # Generate provenance signing key
@@ -98,7 +74,7 @@ mv cosign.key vsa.key
 mv cosign.pub vsa.pub
 ```
 
-**Configure Chains:**
+### Configure Chains
 
 ```bash
 # Create Chains signing secret
@@ -124,7 +100,7 @@ kubectl patch configmap chains-config -n tekton-chains --type merge -p '{
 kubectl rollout restart deployment tekton-chains-controller -n tekton-chains
 ```
 
-**Create verification keys secret:**
+### Create verification keys secret
 
 ```bash
 # Create secret with both provenance public key and VSA private key
@@ -133,7 +109,7 @@ kubectl create secret generic mild-to-wild-keys \
   --from-file=vsa-key=vsa.key
 ```
 
-**Registry credentials:**
+### Registry credentials
 
 ```bash
 # Create docker-registry secret
@@ -149,9 +125,9 @@ kubectl annotate secret registry-credentials tekton.dev/docker-0=<your-registry>
 kubectl patch serviceaccount default -p '{"secrets":[{"name":"registry-credentials"}]}'
 ```
 
-**Build with git resolver:**
+### Build with git resolver
 
-The IMAGE param is a repository (no tag) — the task generates a timestamp tag automatically.
+The IMAGE param is a repository without a tag — the task generates a timestamp tag automatically.
 
 ```bash
 # Get current commit SHA (MUST be full 40-character SHA for git resolver)
@@ -190,7 +166,7 @@ BUILD_TAG=$(kubectl get taskrun mild-to-wild-build -o jsonpath='{.status.results
 echo "Built image tag: ${BUILD_TAG}"
 ```
 
-**Verify with medium policy (SLSA Build Level 2):**
+### Verify with medium policy (SLSA Build Level 2)
 
 ```bash
 kubectl apply -f - <<EOF
@@ -220,7 +196,7 @@ spec:
 EOF
 ```
 
-**Verify with wild policy (SLSA Build Level 3):**
+### Verify with wild policy (SLSA Build Level 3)
 
 ```bash
 kubectl apply -f - <<EOF
@@ -250,7 +226,7 @@ spec:
 EOF
 ```
 
-**Check VSAs:**
+### Check VSAs
 
 ```bash
 # Get image digest
@@ -267,6 +243,4 @@ cosign verify-attestation --key vsa.pub --insecure-ignore-tlog \
 
 ## Key Takeaway
 
-Policy engines are interchangeable because attestation standards are open
-(in-toto, SLSA). Your policies travel with you -- pick the engine that fits
-your stack.
+Policy engines are interchangeable because attestation standards are open (in-toto, SLSA). Your policies travel with you — pick the engine that fits your stack.
