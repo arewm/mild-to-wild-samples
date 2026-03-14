@@ -26,8 +26,10 @@ spec:
         - github.com/arewm/mild-to-wild-samples//2-medium/conforma?ref=main
         - github.com/arewm/mild-to-wild-samples//3-wild/conforma?ref=main
       data:
-        # Trusted task bundle data -- lists approved Tekton task bundles
+        # Trusted task bundle data for PipelineRun provenance
         - oci::quay.io/konflux-ci/tekton-catalog/data-acceptable-bundles:latest
+        # Trusted task refs for TaskRun provenance (git resolver)
+        - github.com/arewm/mild-to-wild-samples//3-wild/tekton?ref=main
       ruleData:
         allowed_builder_ids:
           - "https://github.com/arewm/mild-to-wild-samples/tekton-build"
@@ -50,3 +52,4 @@ spec:
           - medium.sbom_present
           # Wild rules
           - wild.all_tasks_trusted
+          - wild.pipelinerun_provenance_for_trusted_tasks

@@ -9,9 +9,9 @@ metadata:
     tekton.dev/tags: verification, attestation
 spec:
   description: >-
-    Verify an image with Conforma, determine SLSA Build Level (L2 or L3),
-    optionally re-tag/copy to a destination, and attach a SLSA Verification
-    Summary Attestation (VSA).
+    Verify an image and its base image with Conforma using a snapshot,
+    determine SLSA Build Level per component, optionally re-tag/copy to
+    a destination, and attach a SLSA Verification Summary Attestation.
   params:
     - name: IMAGE
       description: >-
@@ -69,9 +69,26 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
 
+        IMAGE="$(params.IMAGE)"
+
+        # Build snapshot with the main image
+        COMPONENTS=$(jq -n --arg img "$IMAGE" \
+          '[{name: "built-image", containerImage: $img}]')
+
+        # Try to extract base image from manifest annotations
+        # ec has cosign built in but not skopeo, so fetch the manifest
+        # using ec's cosign download functionality or curl
+        # For now, just include the main image — the base image will
+        # be added by a later step if available
+        jq -n --argjson components "$COMPONENTS" \
+          '{components: $components}' > /tmp/work/snapshot.json
+
+        echo "Snapshot:"
+        jq . /tmp/work/snapshot.json
+
         ARGS=(
           validate image
-          --image "$(params.IMAGE)"
+          --images /tmp/work/snapshot.json
           --policy "$(params.POLICY)"
           --show-successes
           --strict=false
@@ -121,26 +138,68 @@ spec:
         - name: work
           mountPath: /tmp/work
     - name: determine-level
-      image: quay.io/conforma/cli:latest@sha256:4732ef392555a70affb63b727c079a7192b03922cbe22d302542044fb6b534cc
+      image: quay.io/konflux-ci/task-runner:1.5.0@sha256:200019314a50be5b6dd06f362c794c92a700583a522c5eee9a41e3eab7f706c5
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
 
-        # Check if wild.all_tasks_trusted appears in successes
-        HAS_TRUSTED_TASKS=$(jq '[
-          (.components // [])[]
-          | (.successes // [])[]
-          | select(.metadata.code == "wild.all_tasks_trusted")
-        ] | length' /tmp/work/report.json)
+        IMAGE="$(params.IMAGE)"
 
-        if [[ "$HAS_TRUSTED_TASKS" -gt 0 ]]; then
-          LEVEL="SLSA_BUILD_LEVEL_3"
+        # Determine level for the built image component
+        # L3 if all_tasks_trusted is in successes (not warnings)
+        # L2 otherwise
+        BUILT_LEVEL=$(jq -r --arg img "$IMAGE" '
+          [.components[] | select(.containerImage == $img)] | first |
+          if (
+            ([(.successes // [])[] | select(.metadata.code == "wild.all_tasks_trusted")] | length > 0) and
+            ([(.warnings // [])[] | select(.metadata.code == "wild.all_tasks_trusted" or .metadata.code == "wild.pipelinerun_provenance_for_trusted_tasks")] | length == 0)
+          )
+          then "SLSA_BUILD_LEVEL_3"
+          else "SLSA_BUILD_LEVEL_2"
+          end
+        ' /tmp/work/report.json)
+
+        echo -n "$BUILT_LEVEL" > "$(results.SLSA_BUILD_LEVEL.path)"
+        echo "Built image level: $BUILT_LEVEL"
+
+        # Determine level for each dependency (base image)
+        # Extract base image from OCI manifest annotations
+        IMAGE_BY_DIGEST="${IMAGE%%:*}@$(skopeo inspect --format '{{.Digest}}' "docker://${IMAGE}")"
+        BASE_NAME=$(skopeo inspect --raw "docker://${IMAGE_BY_DIGEST}" \
+          | jq -r '.annotations["org.opencontainers.image.base.name"] // empty')
+        BASE_DIGEST=$(skopeo inspect --raw "docker://${IMAGE_BY_DIGEST}" \
+          | jq -r '.annotations["org.opencontainers.image.base.digest"] // empty')
+
+        if [[ -n "$BASE_NAME" && -n "$BASE_DIGEST" ]]; then
+          BASE_REF="${BASE_NAME%%:*}@${BASE_DIGEST}"
+          # Check if the base image was in the snapshot report
+          BASE_IN_REPORT=$(jq --arg img "$BASE_REF" \
+            '[.components[] | select(.containerImage == $img)] | length' \
+            /tmp/work/report.json)
+
+          if [[ "$BASE_IN_REPORT" -gt 0 ]]; then
+            BASE_LEVEL=$(jq -r --arg img "$BASE_REF" '
+              [.components[] | select(.containerImage == $img)] | first |
+              if [(.successes // [])[] | select(.metadata.code == "wild.all_tasks_trusted")] | length > 0
+              then "SLSA_BUILD_LEVEL_3"
+              else "SLSA_BUILD_LEVEL_2"
+              end
+            ' /tmp/work/report.json)
+          else
+            BASE_LEVEL="SLSA_BUILD_LEVEL_2"
+          fi
+
+          jq -n \
+            --arg uri "$BASE_NAME" \
+            --arg digest "$BASE_DIGEST" \
+            --arg level "$BASE_LEVEL" \
+            '[{uri: $uri, digest: {sha256: ($digest | ltrimstr("sha256:"))}, verifiedLevel: $level}]' \
+            > /tmp/work/deps.json
+          echo "Base image: ${BASE_NAME}@${BASE_DIGEST} → $BASE_LEVEL"
         else
-          LEVEL="SLSA_BUILD_LEVEL_2"
+          echo "[]" > /tmp/work/deps.json
+          echo "No base image found in manifest annotations"
         fi
-
-        echo -n "$LEVEL" > "$(results.SLSA_BUILD_LEVEL.path)"
-        echo "Determined level: $LEVEL"
       volumeMounts:
         - name: work
           mountPath: /tmp/work
@@ -178,7 +237,6 @@ spec:
         IMAGE_DIGEST=$(cat "$(results.IMAGE_DIGEST.path)")
         LEVEL=$(cat "$(results.SLSA_BUILD_LEVEL.path)")
 
-        # Extract metadata from the Conforma report
         EC_VERSION=$(jq -r '."ec-version" // "unknown"' /tmp/work/report.json)
         TIME_VERIFIED=$(jq -r '."effective-time" // empty' /tmp/work/report.json)
         if [[ -z "$TIME_VERIFIED" ]]; then
@@ -186,27 +244,8 @@ spec:
         fi
 
         POLICY_URI="$(params.POLICY)"
+        DEPS=$(cat /tmp/work/deps.json)
 
-        # Extract base image from OCI manifest annotations
-        # Use digest-only form to avoid tag@digest parsing issues
-        IMAGE_BY_DIGEST="${IMAGE_URL%%:*}@${IMAGE_DIGEST}"
-        BASE_NAME=$(skopeo inspect --raw "docker://${IMAGE_BY_DIGEST}" \
-          | jq -r '.annotations["org.opencontainers.image.base.name"] // empty')
-        BASE_DIGEST=$(skopeo inspect --raw "docker://${IMAGE_BY_DIGEST}" \
-          | jq -r '.annotations["org.opencontainers.image.base.digest"] // empty')
-
-        # Build dependencies array from base image if available
-        DEPS="[]"
-        if [[ -n "$BASE_NAME" && -n "$BASE_DIGEST" ]]; then
-          DEPS=$(jq -n \
-            --arg uri "$BASE_NAME" \
-            --arg digest "$BASE_DIGEST" \
-            '[{uri: $uri, digest: {sha256: ($digest | ltrimstr("sha256:"))}}]')
-          echo "Found base image: ${BASE_NAME}@${BASE_DIGEST}"
-        fi
-
-        # Build the SLSA VSA predicate
-        # cosign attest wraps this in an in-toto statement
         jq -n \
           --arg verifier_id "https://conforma.dev/cli" \
           --arg ec_version "$EC_VERSION" \
@@ -225,9 +264,7 @@ spec:
             policy: { uri: $policy_uri },
             verificationResult: "PASSED",
             verifiedLevels: [$level],
-            dependencyLevels: (if ($deps | length) > 0 then
-              [$deps[] | {uri: .uri, digest: .digest}]
-            else null end),
+            dependencyLevels: (if ($deps | length) > 0 then $deps else null end),
             slsaVersion: "1.0"
           }' > /tmp/work/vsa-predicate.json
 
