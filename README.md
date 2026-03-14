@@ -92,7 +92,8 @@ kubectl patch configmap chains-config -n tekton-chains --type merge -p '{
     "artifacts.pipelinerun.format": "slsa/v2alpha4",
     "artifacts.pipelinerun.storage": "oci",
     "artifacts.oci.storage": "oci",
-    "transparency.enabled": "false"
+    "transparency.enabled": "false",
+    "builderID": "https://github.com/arewm/mild-to-wild-samples/tekton-build"
   }
 }'
 
