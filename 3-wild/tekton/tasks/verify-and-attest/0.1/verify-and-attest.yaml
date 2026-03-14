@@ -1,0 +1,229 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: verify-and-attest
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.50.0"
+    tekton.dev/tags: verification, attestation
+spec:
+  description: >-
+    Verify an image with Conforma, determine SLSA Build Level (L2 or L3),
+    optionally re-tag/copy to a destination, and attach a SLSA Verification
+    Summary Attestation (VSA).
+  params:
+    - name: IMAGE
+      description: >-
+        Image reference to verify (with tag or digest).
+      type: string
+    - name: POLICY
+      description: >-
+        Policy configuration for ec validate. Can be a file path or git URL.
+      type: string
+    - name: IGNORE_REKOR
+      description: >-
+        Skip Rekor transparency log verification.
+      type: string
+      default: "true"
+    - name: DESTINATION
+      description: >-
+        Destination image reference (repository:tag or repository@digest).
+        If empty, the VSA is attached to the source image.
+      type: string
+      default: ""
+    - name: PUBLIC_KEY
+      description: >-
+        Filename of the provenance verification public key in the keys workspace.
+      type: string
+      default: "provenance-pub"
+    - name: VSA_SIGNING_KEY
+      description: >-
+        Filename of the VSA signing private key in the keys workspace.
+      type: string
+      default: "vsa-key"
+    - name: EXTRA_EC_ARGS
+      description: >-
+        Additional arguments to pass to ec validate image.
+      type: string
+      default: ""
+  workspaces:
+    - name: keys
+      description: >-
+        Workspace containing signing keys. Must include the provenance
+        verification public key and the VSA signing private key.
+        The PUBLIC_KEY and VSA_SIGNING_KEY params specify the filenames.
+  results:
+    - name: IMAGE_URL
+      description: Image reference the VSA was attached to.
+    - name: IMAGE_DIGEST
+      description: Digest of the image the VSA was attached to.
+    - name: SLSA_BUILD_LEVEL
+      description: Determined SLSA Build Level (SLSA_BUILD_LEVEL_2 or SLSA_BUILD_LEVEL_3).
+    - name: TEST_OUTPUT
+      description: Conforma policy evaluation result (PASSED or FAILED).
+  steps:
+    - name: verify
+      image: quay.io/conforma/cli:latest@sha256:4732ef392555a70affb63b727c079a7192b03922cbe22d302542044fb6b534cc
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        ARGS=(
+          validate image
+          --image "$(params.IMAGE)"
+          --policy "$(params.POLICY)"
+          --show-successes
+          --strict=false
+          --output "json=/tmp/work/report.json"
+        )
+
+        KEY_PATH="$(workspaces.keys.path)/$(params.PUBLIC_KEY)"
+        if [[ -f "$KEY_PATH" ]]; then
+          ARGS+=(--public-key "$KEY_PATH")
+        fi
+
+        if [[ "$(params.IGNORE_REKOR)" == "true" ]]; then
+          ARGS+=(--ignore-rekor)
+        fi
+
+        # shellcheck disable=SC2086
+        if [[ -n "$(params.EXTRA_EC_ARGS)" ]]; then
+          ARGS+=($(params.EXTRA_EC_ARGS))
+        fi
+
+        echo "Running: ec ${ARGS[*]}"
+        EC_EXIT=0
+        ec "${ARGS[@]}" || EC_EXIT=$?
+
+        if [[ ! -s /tmp/work/report.json ]]; then
+          echo "ec failed to produce a report (exit code: $EC_EXIT)"
+          exit 1
+        fi
+
+        # Determine pass/fail from the report
+        RESULT=$(jq -r '
+          if (.components // [] | length) == 0 then "FAILED"
+          elif [.components[] | select((.failures // []) | length > 0)] | length > 0 then "FAILED"
+          else "PASSED"
+          end
+        ' /tmp/work/report.json)
+
+        echo -n "$RESULT" > "$(results.TEST_OUTPUT.path)"
+        echo "Policy evaluation: $RESULT"
+
+        if [[ "$RESULT" != "PASSED" ]]; then
+          echo "Policy evaluation failed:"
+          jq '.components[].failures[]?' /tmp/work/report.json
+          exit 1
+        fi
+      volumeMounts:
+        - name: work
+          mountPath: /tmp/work
+    - name: determine-level
+      image: quay.io/conforma/cli:latest@sha256:4732ef392555a70affb63b727c079a7192b03922cbe22d302542044fb6b534cc
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # Check if wild.all_tasks_trusted appears in successes
+        HAS_TRUSTED_TASKS=$(jq '[
+          (.components // [])[]
+          | (.successes // [])[]
+          | select(.metadata.code == "wild.all_tasks_trusted")
+        ] | length' /tmp/work/report.json)
+
+        if [[ "$HAS_TRUSTED_TASKS" -gt 0 ]]; then
+          LEVEL="SLSA_BUILD_LEVEL_3"
+        else
+          LEVEL="SLSA_BUILD_LEVEL_2"
+        fi
+
+        echo -n "$LEVEL" > "$(results.SLSA_BUILD_LEVEL.path)"
+        echo "Determined level: $LEVEL"
+      volumeMounts:
+        - name: work
+          mountPath: /tmp/work
+    - name: copy-image
+      image: quay.io/konflux-ci/task-runner:1.5.0@sha256:200019314a50be5b6dd06f362c794c92a700583a522c5eee9a41e3eab7f706c5
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        SOURCE="$(params.IMAGE)"
+        DEST="$(params.DESTINATION)"
+
+        if [[ -z "$DEST" ]]; then
+          DIGEST=$(skopeo inspect --format '{{.Digest}}' "docker://${SOURCE}")
+          echo -n "$SOURCE" > "$(results.IMAGE_URL.path)"
+          echo -n "$DIGEST" > "$(results.IMAGE_DIGEST.path)"
+          echo "No destination specified, using source: $SOURCE@$DIGEST"
+          exit 0
+        fi
+
+        echo "Copying $SOURCE to $DEST"
+        skopeo copy "docker://${SOURCE}" "docker://${DEST}"
+
+        DIGEST=$(skopeo inspect --format '{{.Digest}}' "docker://${DEST}")
+        echo -n "$DEST" > "$(results.IMAGE_URL.path)"
+        echo -n "$DIGEST" > "$(results.IMAGE_DIGEST.path)"
+        echo "Copied to: $DEST@$DIGEST"
+    - name: generate-and-attach-vsa
+      image: quay.io/konflux-ci/task-runner:1.5.0@sha256:200019314a50be5b6dd06f362c794c92a700583a522c5eee9a41e3eab7f706c5
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        IMAGE_URL=$(cat "$(results.IMAGE_URL.path)")
+        IMAGE_DIGEST=$(cat "$(results.IMAGE_DIGEST.path)")
+        LEVEL=$(cat "$(results.SLSA_BUILD_LEVEL.path)")
+
+        # Extract metadata from the Conforma report
+        EC_VERSION=$(jq -r '."ec-version" // "unknown"' /tmp/work/report.json)
+        TIME_VERIFIED=$(jq -r '."effective-time" // empty' /tmp/work/report.json)
+        if [[ -z "$TIME_VERIFIED" ]]; then
+          TIME_VERIFIED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        fi
+
+        POLICY_URI="$(params.POLICY)"
+
+        # Build the SLSA VSA predicate
+        # cosign attest wraps this in an in-toto statement
+        jq -n \
+          --arg verifier_id "https://conforma.dev/cli" \
+          --arg ec_version "$EC_VERSION" \
+          --arg time_verified "$TIME_VERIFIED" \
+          --arg resource_uri "${IMAGE_URL}@${IMAGE_DIGEST}" \
+          --arg policy_uri "$POLICY_URI" \
+          --arg level "$LEVEL" \
+          '{
+            verifier: {
+              id: $verifier_id,
+              version: { ec: $ec_version }
+            },
+            timeVerified: $time_verified,
+            resourceUri: $resource_uri,
+            policy: { uri: $policy_uri },
+            verificationResult: "PASSED",
+            verifiedLevels: [$level],
+            slsaVersion: "1.0"
+          }' > /tmp/work/vsa-predicate.json
+
+        echo "Generated VSA predicate:"
+        jq . /tmp/work/vsa-predicate.json
+
+        KEY_PATH="$(workspaces.keys.path)/$(params.VSA_SIGNING_KEY)"
+        COSIGN_PASSWORD="" cosign attest \
+          --key "$KEY_PATH" \
+          --type https://slsa.dev/verification_summary/v1 \
+          --predicate /tmp/work/vsa-predicate.json \
+          --tlog-upload=false \
+          "${IMAGE_URL}@${IMAGE_DIGEST}"
+
+        echo "VSA attached to ${IMAGE_URL}@${IMAGE_DIGEST}"
+      volumeMounts:
+        - name: work
+          mountPath: /tmp/work
+  volumes:
+    - name: work
+      emptyDir: {}

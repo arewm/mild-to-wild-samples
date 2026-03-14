@@ -13,7 +13,7 @@ spec:
     Outputs results for Tekton Chains provenance generation.
   params:
     - name: IMAGE
-      description: Fully qualified image reference to push to.
+      description: Image repository to push to (without tag). A timestamp tag is generated automatically.
       type: string
     - name: CONTAINERFILE
       description: Path to the Containerfile relative to the source root.
@@ -62,19 +62,22 @@ spec:
         set -euo pipefail
         cd /workspace/source
 
+        TAG="build-$(date -u +%Y%m%d-%H%M%S)"
+        IMAGE_REF="$(params.IMAGE):${TAG}"
+
         buildah --storage-driver=vfs bud \
           --format oci \
           --no-cache \
           -f "$(params.CONTAINERFILE)" \
-          -t "$(params.IMAGE)" \
+          -t "${IMAGE_REF}" \
           "$(params.CONTEXT)"
 
         buildah --storage-driver=vfs push \
           --digestfile /tmp/image-digest \
-          "$(params.IMAGE)"
+          "${IMAGE_REF}"
 
         DIGEST=$(cat /tmp/image-digest)
-        echo -n "$(params.IMAGE)" > "$(results.IMAGE_URL.path)"
+        echo -n "${IMAGE_REF}" > "$(results.IMAGE_URL.path)"
         echo -n "$DIGEST" > "$(results.IMAGE_DIGEST.path)"
       volumeMounts:
         - name: source
