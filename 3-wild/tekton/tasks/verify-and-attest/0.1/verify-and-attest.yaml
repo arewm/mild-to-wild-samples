@@ -278,7 +278,7 @@ spec:
           --type https://slsa.dev/verification_summary/v1 \
           --predicate /tmp/work/vsa-predicate.json \
           --tlog-upload=false \
-          --registry-referrers-mode=oci-1-1 \
+          --new-bundle-format \
           "${IMAGE_URL}@${IMAGE_DIGEST}"
 
         echo "VSA attached to ${IMAGE_URL}@${IMAGE_DIGEST}"
