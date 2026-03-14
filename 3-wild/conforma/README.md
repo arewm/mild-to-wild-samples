@@ -1,61 +1,35 @@
 # Wild: Conforma
 
-Trusted task bundle verification in Tekton provenance using Conforma.
+Trusted task verification in Tekton provenance using Conforma.
 
 ## What This Checks
 
-1. **All task bundles are trusted** -- every task in the Tekton PipelineRun
-   provenance references a bundle that is allowed by the `trusted_task_rules`
-   configuration
+1. **All medium checks** -- builds on the medium level
+2. **All tasks trusted** -- tasks in the Tekton provenance are verified against trusted task data (warn rule, not deny)
+3. **Tekton provenance available** -- warns if no Tekton provenance is found (needed for task verification)
+
+The policy supports both PipelineRun and TaskRun provenance:
+- **PipelineRun provenance** -- checks task bundles against `trusted_task_rules` configuration
+- **TaskRun provenance** -- checks resolvedDependencies for task refs against `trusted_task_refs` data
+
+Untrusted tasks produce warnings, not failures. The verify-and-attest task produces a VSA at SLSA_BUILD_LEVEL_3 when all tasks are trusted, or SLSA_BUILD_LEVEL_2 otherwise.
 
 ## Why This Matters
 
-Tekton Chains accurately records the tasks that ran in a pipeline. But pipelines are user-customizable -- any task *could* have injected or copied a different artifact. By verifying that every task is allowed by the trusted task rules (and deny rules don't match), we can reason about artifact integrity: a trusted task behaves according to the organization's security policies.
+Tekton Chains accurately records the tasks that ran. But pipelines are user-customizable -- any task could have injected a different artifact. By verifying that every task is trusted (via pinned bundle digest or git resolver), we close the provenance loop: a pinned task behaves deterministically because it was pinned before the build ran.
 
-Note: Signature verification is handled by the Conforma CLI before policy evaluation. Policies do not verify signatures.
+Note: Signature verification is handled by the Conforma CLI before policy evaluation. Policies check attestation content.
 
 ## Dependencies
 
 This policy requires the Conforma policy library from the `conforma-policy` repository:
-- `data.lib` - provides result helpers and Tekton-specific attestation filtering
+- `data.lib` - provides result helpers and attestation filtering
 - `data.lib.tekton` - provides Tekton task helpers including trusted task validation
 - `data.lib.rule_data` - provides access to rule_data configuration
 
-## Rule Data Configuration
+## Trusted Task Data
 
-The policy reads `trusted_task_rules` from rule_data, which contains pattern-based allow/deny rules. Example:
-
-```yaml
-# In your ec-policy configuration
-sources:
-  - data:
-      - oci::quay.io/your-org/policy-data:latest
-    policy:
-      - oci::quay.io/your-org/policies:latest
-```
-
-The policy data should contain:
-
-```json
-{
-  "trusted_task_rules": {
-    "allow": [
-      {
-        "name": "Allow Konflux catalog tasks",
-        "pattern": "oci://quay.io/konflux-ci/tekton-catalog/*"
-      }
-    ],
-    "deny": [
-      {
-        "name": "Deny deprecated buildah versions",
-        "pattern": "oci://quay.io/konflux-ci/tekton-catalog/task-buildah*",
-        "versions": ["<0.4"],
-        "message": "Upgrade to buildah 0.4 or newer"
-      }
-    ]
-  }
-}
-```
+Trusted task data lives in `conforma/data/trusted-tasks.yaml` in this repository. For PipelineRun provenance, the policy uses `trusted_task_rules` (pattern-based allow/deny). For TaskRun provenance, it uses `trusted_task_refs` (explicit URI and digest mappings).
 
 ## Running
 
@@ -65,7 +39,7 @@ the trusted task bundle data source:
 ```bash
 ec validate image \
   --image <IMAGE_REF> \
-  --policy wild/conforma/policy.yaml
+  --policy 3-wild/conforma/policy.yaml
 ```
 
 The `trusted_task_rules` will be loaded from your configured policy data source.

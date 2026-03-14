@@ -8,9 +8,9 @@ enforcement with two interchangeable policy engines.
 
 | Level | What it checks | Directory |
 |-------|---------------|-----------|
-| **Mild** | Attestation presence, signer identity, SLSA level | [`1-mild/`](1-mild/) |
-| **Medium** | Provenance content inspection, multi-attestation evaluation, VSA/SVR production | [`2-medium/`](2-medium/) |
-| **Wild** | Trusted task bundle digests in Tekton provenance | [`3-wild/`](3-wild/) |
+| **Mild** | Provenance presence, build type, builder identity, source materials, external parameters | [`1-mild/`](1-mild/) |
+| **Medium** | Source branch, SBOM presence, VSA production | [`2-medium/`](2-medium/) |
+| **Wild** | Trusted task verification (PipelineRun and TaskRun provenance) | [`3-wild/`](3-wild/) |
 
 Each level contains policies for both engines:
 
@@ -54,8 +54,9 @@ export CONFORMA_CLI_PATH=/path/to/conforma-cli
 
 ## Building images (Wild level)
 
-The `3-wild/tekton/` directory includes a Tekton Task for building images with
-SLSA v1.0 provenance via Tekton Chains.
+The `3-wild/tekton/` directory includes tasks for building and verifying images with
+SLSA v1.0 provenance. Builds use the git resolver to reference tasks, enabling trusted
+task verification.
 
 **Prerequisites:**
 
@@ -79,21 +80,35 @@ kubectl apply -f https://storage.googleapis.com/tekton-releases/chains/latest/re
 kubectl wait -n tekton-chains --for=condition=ready pod -l app.kubernetes.io/part-of=tekton-chains --timeout=300s
 ```
 
-**Configure Chains for SLSA v1.0:**
+**Generate key pairs:**
+
+Two separate cosign key pairs are needed:
+- **Provenance signing** (for Tekton Chains)
+- **VSA signing** (for verify-and-attest task)
 
 ```bash
-# Generate cosign key pair (no password)
+# Generate provenance signing key
 COSIGN_PASSWORD="" cosign generate-key-pair
+mv cosign.key provenance.key
+mv cosign.pub provenance.pub
 
-# Create signing secret
+# Generate VSA signing key
+COSIGN_PASSWORD="" cosign generate-key-pair
+mv cosign.key vsa.key
+mv cosign.pub vsa.pub
+```
+
+**Configure Chains:**
+
+```bash
+# Create Chains signing secret
 kubectl create secret generic signing-secrets \
-  --from-file=cosign.key=cosign.key \
-  --from-file=cosign.pub=cosign.pub \
+  --from-file=cosign.key=provenance.key \
+  --from-file=cosign.pub=provenance.pub \
   --from-file=cosign.password=<(echo -n "") \
   -n tekton-chains
 
-# Configure Chains — use slsa/v2alpha4 for SLSA v1.0 provenance
-# (slsa/v1 is a backward-compat alias for in-toto, NOT SLSA v1.0)
+# Configure Chains for SLSA v1.0 (slsa/v2alpha4 format, NOT slsa/v1)
 kubectl patch configmap chains-config -n tekton-chains --type merge -p '{
   "data": {
     "artifacts.taskrun.format": "slsa/v2alpha4",
@@ -107,6 +122,15 @@ kubectl patch configmap chains-config -n tekton-chains --type merge -p '{
 
 # Restart Chains controller
 kubectl rollout restart deployment tekton-chains-controller -n tekton-chains
+```
+
+**Create verification keys secret:**
+
+```bash
+# Create secret with both provenance public key and VSA private key
+kubectl create secret generic mild-to-wild-keys \
+  --from-file=provenance-pub=provenance.pub \
+  --from-file=vsa-key=vsa.key
 ```
 
 **Registry credentials:**
@@ -125,13 +149,15 @@ kubectl annotate secret registry-credentials tekton.dev/docker-0=<your-registry>
 kubectl patch serviceaccount default -p '{"secrets":[{"name":"registry-credentials"}]}'
 ```
 
-**Run the build:**
+**Build with git resolver:**
+
+The IMAGE param is a repository (no tag) — the task generates a timestamp tag automatically.
 
 ```bash
-# Apply the Task
-kubectl apply -f 3-wild/tekton/tasks/build-and-push/0.1/build-and-push.yaml
+# Get current commit SHA (MUST be full 40-character SHA for git resolver)
+COMMIT=$(git rev-parse HEAD)
 
-# Create a TaskRun
+# Build
 kubectl apply -f - <<EOF
 apiVersion: tekton.dev/v1
 kind: TaskRun
@@ -139,30 +165,104 @@ metadata:
   name: mild-to-wild-build
 spec:
   taskRef:
-    name: build-and-push
+    resolver: git
+    params:
+      - name: url
+        value: https://github.com/arewm/mild-to-wild-samples
+      - name: revision
+        value: ${COMMIT}
+      - name: pathInRepo
+        value: 3-wild/tekton/tasks/build-and-push/0.1/build-and-push.yaml
   params:
     - name: IMAGE
-      value: <your-registry>/mild-to-wild-samples:latest
+      value: <your-registry>/mild-to-wild-samples
     - name: SOURCE_URL
       value: https://github.com/arewm/mild-to-wild-samples
     - name: SOURCE_REF
       value: main
 EOF
+
+# Wait for build to complete
+kubectl wait --for=condition=Succeeded taskrun/mild-to-wild-build --timeout=10m
+
+# Get the generated image tag
+BUILD_TAG=$(kubectl get taskrun mild-to-wild-build -o jsonpath='{.status.results[?(@.name=="IMAGE_URL")].value}' | sed 's/.*://')
+echo "Built image tag: ${BUILD_TAG}"
 ```
 
-**Verify attestation:**
+**Verify with medium policy (SLSA Build Level 2):**
 
 ```bash
-# Check results
-kubectl get taskrun mild-to-wild-build -o jsonpath='{.status.results}' | jq .
+kubectl apply -f - <<EOF
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: mild-to-wild-verify-medium
+spec:
+  taskRef:
+    resolver: git
+    params:
+      - name: url
+        value: https://github.com/arewm/mild-to-wild-samples
+      - name: revision
+        value: ${COMMIT}
+      - name: pathInRepo
+        value: 3-wild/tekton/tasks/verify-and-attest/0.1/verify-and-attest.yaml
+  workspaces:
+    - name: keys
+      secret:
+        secretName: mild-to-wild-keys
+  params:
+    - name: IMAGE
+      value: <your-registry>/mild-to-wild-samples:${BUILD_TAG}
+    - name: POLICY
+      value: github.com/arewm/mild-to-wild-samples//2-medium/conforma?ref=main
+EOF
+```
 
-# Check Chains signed annotation
-kubectl get taskrun mild-to-wild-build -o jsonpath='{.metadata.annotations.chains\.tekton\.dev/signed}'
+**Verify with wild policy (SLSA Build Level 3):**
 
-# Verify attestation with cosign
-cosign verify-attestation --key cosign.pub --insecure-ignore-tlog \
-  --type https://slsa.dev/provenance/v1 \
-  <your-registry>/mild-to-wild-samples:latest
+```bash
+kubectl apply -f - <<EOF
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: mild-to-wild-verify-wild
+spec:
+  taskRef:
+    resolver: git
+    params:
+      - name: url
+        value: https://github.com/arewm/mild-to-wild-samples
+      - name: revision
+        value: ${COMMIT}
+      - name: pathInRepo
+        value: 3-wild/tekton/tasks/verify-and-attest/0.1/verify-and-attest.yaml
+  workspaces:
+    - name: keys
+      secret:
+        secretName: mild-to-wild-keys
+  params:
+    - name: IMAGE
+      value: <your-registry>/mild-to-wild-samples:${BUILD_TAG}
+    - name: POLICY
+      value: github.com/arewm/mild-to-wild-samples//3-wild/conforma?ref=main
+EOF
+```
+
+**Check VSAs:**
+
+```bash
+# Get image digest
+IMAGE_DIGEST=$(kubectl get taskrun mild-to-wild-verify-medium -o jsonpath='{.status.results[?(@.name=="IMAGE_DIGEST")].value}')
+
+# List referrers
+oras discover <your-registry>/mild-to-wild-samples@${IMAGE_DIGEST}
+
+# Verify VSAs
+cosign verify-attestation --key vsa.pub --insecure-ignore-tlog \
+  --type https://slsa.dev/verification_summary/v1 \
+  <your-registry>/mild-to-wild-samples:${BUILD_TAG}
 ```
 
 ## Key Takeaway

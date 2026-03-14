@@ -5,13 +5,12 @@
 At the medium level, we go beyond presence checks and inspect provenance
 *content*:
 
-- Which source repo and branch was used?
-- What were the build parameters?
-- Can we combine provenance with other attestations (e.g. SBOM)?
+- Which source branch was used (trusted branch check)?
+- Is there an SBOM attached to the artifact?
 
-Both engines can also produce summary attestations (VSA/SVR) as output,
-decoupling "who evaluates" from "who enforces." An admission controller can
-check the VSA without re-running verification.
+The verify-and-attest task produces a Verification Summary Attestation (VSA) at
+SLSA_BUILD_LEVEL_2, decoupling "who evaluates" from "who enforces." An admission
+controller can check the VSA without re-running verification.
 
 See [conforma/](conforma/) and [ampel/](ampel/) for engine-specific policies
 and invocation instructions.

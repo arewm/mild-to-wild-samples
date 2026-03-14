@@ -39,11 +39,6 @@ run_test() {
         "${CONFORMA_POLICY_PATH}/policy/release/lib"
     )
 
-    # Mild includes the github_certificate package for GHA signer identity checks
-    if [[ "${level}" == "mild" ]]; then
-        paths+=("${CONFORMA_POLICY_PATH}/policy/release/github_certificate")
-    fi
-
     # Map level name to directory name
     local dir_map_mild="1-mild"
     local dir_map_medium="2-medium"
