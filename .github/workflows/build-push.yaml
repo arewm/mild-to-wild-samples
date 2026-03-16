@@ -96,8 +96,10 @@ jobs:
           # Write updated statement to file
           echo "$UPDATED" > /tmp/provenance.json
 
+          cat /tmp/provenance.json | jq
+
           # Push the modified attestation with cosign
-          cosign attest --yes --type slsaprovenance \
+          cosign attest --yes --type https://slsa.dev/provenance/v1 \
             --predicate /tmp/provenance.json \
             --new-bundle-format \
             "${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}"
