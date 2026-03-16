@@ -1,0 +1,29 @@
+name: Verify Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-image.yaml'
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Install crane
+        uses: imjasonh/setup-crane@6da1ae018866400525525ce74ff892880c099987 # v0.5
+
+      - name: Extract base image reference
+        id: base
+        run: |
+          BASE_IMAGE=$(crane manifest "${{ env.IMAGE_NAME }}" | jq -r '.annotations["org.opencontainers.image.base.name"] + "@" + .annotations["org.opencontainers.image.base.digest"]')
+          echo "base-image=${BASE_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Base image: ${BASE_IMAGE}"
