@@ -1,41 +1,50 @@
 {
     // Medium: provenance content inspection and SBOM presence
     id: medium-policy
-    version: "1"
+
+    meta: {
+        version: 1
+    }
 
     policies: [
         {
             id: content-checks
-            version: v0.0.1
 
             meta: {
+                version: 1
                 description: "Inspect provenance content and verify SBOM presence"
-                runtime: cel@v0
+                runtime: "cel@v0"
             }
 
             tenets: [
                 {
                     // Verify the artifact was built from the main branch
+                    // Support both Tekton and GitHub Actions provenance structures
                     id: trusted-source-branch
-                    runtime: cel@v0
+                    runtime: "cel@v0"
                     code: '''
                         predicates.exists(p,
-                            p.data.buildDefinition.externalParameters.source.ref == "refs/heads/main"
+                            // GitHub Actions structure: workflow.ref
+                            (has(p.data.buildDefinition.externalParameters.workflow) && 
+                             p.data.buildDefinition.externalParameters.workflow.ref == "refs/heads/main") ||
+                            // Tekton structure: source.ref  
+                            (has(p.data.buildDefinition.externalParameters.source) &&
+                             p.data.buildDefinition.externalParameters.source.ref == "refs/heads/main")
                         )
                     '''
 
                     predicates: {
-                        types: [https://slsa.dev/provenance/v1]
+                        types: ["https://slsa.dev/provenance/v1"]
                     }
                 }
                 {
                     // Verify a CycloneDX SBOM attestation is present
                     id: sbom-present
-                    runtime: cel@v0
+                    runtime: "cel@v0"
                     code: "size(predicates) > 0"
 
                     predicates: {
-                        types: [https://cyclonedx.org/bom]
+                        types: ["https://cyclonedx.org/bom"]
                     }
                 }
             ]

@@ -24,8 +24,10 @@ spec:
       ruleData:
         allowed_builder_ids:
           - "https://github.com/arewm/mild-to-wild-samples/tekton-build"
+          - "https://github.com/puerco/mild-to-wild-samples/.github/workflows/build-push.yaml@refs/heads/main"
         allowed_build_types:
           - "https://tekton.dev/chains/v2/slsa"
+          - "https://actions.github.io/buildtypes/workflow/v1"
       config:
         include:
           # Mild rules

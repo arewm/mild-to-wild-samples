@@ -28,7 +28,7 @@ import data.lib.tekton
 warn contains result if {
 	some att in lib.pipelinerun_attestations
 	tasks := tekton.tasks(att)
-	untrusted := tekton.untrusted_task_refs(tasks)
+	untrusted := tekton.untrusted_task_refs(tasks, {})
 	count(untrusted) > 0
 
 	some task in untrusted
