@@ -99,6 +99,6 @@ jobs:
           cat /tmp/provenance.json | jq
 
           cosign attest --yes --type https://slsa.dev/provenance/v1 \
-            --attachment-tag-prefix='test' \
+            --new-bundle-format=false \
             --predicate /tmp/provenance.json \
             "${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}"
