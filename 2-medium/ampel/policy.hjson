@@ -3,7 +3,7 @@
     meta: {
         description: 
 '''
-# Image Verification Policy Set
+# Medium: Image Verification Policy Set
 
 Ensures an image matches a SLSA level in its build process and ensures its
 dependencies are also SLSA verified.

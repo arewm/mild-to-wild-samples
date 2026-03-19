@@ -1,47 +1,195 @@
 {
-    // Wild: trusted task bundle verification in Tekton provenance
-    id: wild-policy
-    version: "1"
+    id: "set-verification-with-tasks",
+    meta: {
+        description:
+'''
+#  Wild: Medium level but with trusted tasks check
 
+Builds on Medium by adding a check to ensure the tasks that ran in
+the pipeline are trusted.
+
+## Purpose
+
+Provide additional guarantees to verify the configuration of the build
+system based on attested data.
+
+'''
+        frameworks: [
+            {
+                id: "SLSA",
+                name: "Supply-Chain Levels for Software Artifacts"
+            }
+        ]
+    },
+    common: {
+        context: {
+            // buildPoint captures the build point base. This value can be
+            // pinned to a commit but since it is "baked" in the policy code
+            // we define the VCS locator of the repo without a commit to match
+            // the repo on any revision.
+            buildPoint: {
+                value: "git+https://github.com/arewm/mild-to-wild-samples"
+            },
+            // Builder ID is set to the repository workflow URL.
+            builderId: {
+                value: "https://github.com/arewm/mild-to-wild-samples/tekton-build"
+            },
+            // The build type specifies  
+            buildType: {
+                value: "https://tekton.dev/chains/v2/slsa"
+            },
+        },
+        
+    },
+    // The first three policies verify the provenance atteatstion of the image.
+    // We check that they were built by the CI in our repo.
     policies: [
         {
-            id: trusted-tasks
-            version: v0.0.1
-
-            meta: {
-                description: "Verify every Tekton task bundle is in the approved allowlist"
-                runtime: cel@v0
-            }
-
-            context: {
-                values: {
-                    // Approved task bundle prefixes
-                    allowed_bundle_prefix: {
-                        type: string
-                        required: true
-                        default: "quay.io/konflux-ci/tekton-catalog/"
-                    }
-                }
-            }
-
-            tenets: [
+            // Verify the builder was done in our repository
+            id: "slsa-builder-id",
+            source: {
+                location: { uri: "git+https://github.com/carabiner-dev/policies#slsa/slsa-builder-id.json" }
+            },
+            meta: { controls: [ { framework: "SLSA", class: "BUILD", id: "LEVEL_2" } ] },
+            identities: [
                 {
-                    // Verify all tasks reference approved bundles
-                    id: all-tasks-trusted
-                    runtime: cel@v0
-                    code: '''
-                        predicates.exists(p,
-                            p.data.buildConfig.tasks.all(task,
-                                has(task.ref) && has(task.ref.bundle) &&
-                                task.ref.bundle.startsWith(context.allowed_bundle_prefix)
-                            )
-                        )
-                    '''
-
-                    predicates: {
-                        types: [https://slsa.dev/provenance/v0.2]
+                    // The signer identity is the workload identity of this repository.
+                    // it uses a regexp to allow the policy to work on forks
+                    key: {
+                        data: "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEvYKDUboGCYLv26gDi8lnJkOKy6WS\ntsH1aD5isOyWcA+52p1ArAjDgcHqYPbvVWayIRxNOTq5ECDG5RsWOAu92A==\n-----END PUBLIC KEY-----"
                     }
                 }
+            ]
+        },
+        {
+            // Ensure our image was built on GitHub actions.
+            id: "slsa-build-type",
+            source: {
+                location: { "uri": "git+https://github.com/carabiner-dev/policies#slsa/slsa-build-type.json" }
+            },
+            meta: { controls: [ { framework: "SLSA", class: "BUILD", id: "LEVEL_2" } ] },
+            identities: [
+                {
+                    // The signer identity is the workload identity of this repository.
+                    // it uses a regexp to allow the policy to work on forks
+                    key: {
+                        data: "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEvYKDUboGCYLv26gDi8lnJkOKy6WS\ntsH1aD5isOyWcA+52p1ArAjDgcHqYPbvVWayIRxNOTq5ECDG5RsWOAu92A==\n-----END PUBLIC KEY-----"
+                    }
+                }
+            ]
+        },
+        {
+            // This policy verifies that the image was built from the specific
+            // repository and optionally a commit. 
+            id: "slsa-build-point",
+            source: {
+                location: { uri: "git+https://github.com/carabiner-dev/policies#slsa/slsa-build-point.json" }
+            },
+            meta: {
+                controls: [ { framework: "SLSA", class: "BUILD", id: "LEVEL_2" } ],
+                enforce: ON
+            },
+            identities: [
+                {
+                    // The signer identity is the workload identity of this repository.
+                    // it uses a regexp to allow the policy to work on forks
+                    key: {
+                        data: "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEvYKDUboGCYLv26gDi8lnJkOKy6WS\ntsH1aD5isOyWcA+52p1ArAjDgcHqYPbvVWayIRxNOTq5ECDG5RsWOAu92A==\n-----END PUBLIC KEY-----"
+                    }
+                }
+            ]
+        },
+        {
+            // Verify the base image SLSA level.
+            //
+            // As we already did the full verification, this step checks the VSA
+            // of the base image verification to ensure it is SLSA Level 2.
+            // The VSA provides the summary of the base image verification results. 
+            // 
+            // Since AMPEL is verifying the build image (not the base), we need
+            // to chain the predicates to find the VSA, the chain looks like this:
+            //
+            //   ampel verify  subject  >  Provenance (SLSA v1) > new subject
+            //               (built image)   -- dependency ->     (base image)
+            //                               -- selector   -> 
+            //
+            // By applying a selector to our image's build provenance, we can find
+            // the digest of its base image and the collector can look for its VSA. 
+            //
+            id: verify-base-image
+            source: {
+                location: { uri: "git+https://github.com/carabiner-dev/policies#vsa/slsa-build-level3.json" }
+            },
+            context: {
+                // This is the base image reference
+                baseImage: {
+                    required: true
+                    type: "string"
+                    default: registry.access.redhat.com/ubi10/ubi-minimal
+                },
+                baseDigest: {
+                    type: string
+                    required: true
+                },
+            },
+            chain: [
+                {
+                    // Same as above, we chain the build provenance to extract
+                    // the digest of the image. 
+                    predicate: {
+                        type: "https://slsa.dev/provenance/v1",
+                        
+                        // The tekton attestations don't record the base image
+                        // to we pass it here in a context value, not the most
+                        // secure way to do it, but oh well.
+                        selector: "context.baseDigest"
+                    }
+                }
+            ],
+            //
+            // As we are doing a demo with an unsigned VSA for the chain, here we
+            // cannot verify the attestation identity as this would enforce signature
+            // verification in the chained predicates.
+            //
+            // If you are chaining with signed attestations, then you can uncomment
+            // the identities to verify the signer.
+            //
+            // identities:[
+            //     {
+            //         sigstore: {
+            //             issuer: "https://token.actions.githubusercontent.com",
+            //             identity: "https://github.com/slsa-framework/source-actions/.github/workflows/compute_slsa_source.yml@refs/heads/main"
+            //         }
+            //     }
+            // ]
+        },
+        {
+            id: verify-trusted-tasks
+            meta: { controls: [ { class: "ORG", id: "TRUSTED_TASKS" } ] },
+            context: {
+                // This is the context data from the file
+                trusted_task_refs: {
+                    required: true
+                }
+            },
+             "tenets": [
+                {
+                    "predicates": { "types": ["https://slsa.dev/provenance/v1"] },
+                    "code":
+'''
+has(predicates[0].data.buildDefinition) &&
+has(predicates[0].data.buildDefinition.resolvedDependencies) &&
+has(context.trusted_task_refs) &&
+predicates[0].data.buildDefinition.resolvedDependencies
+  .filter(dep, has(dep.name) && dep.name == "task")
+  .all(dep, context.trusted_task_refs.exists(ref, ref.uri == dep.uri))
+''',
+                    "assessment": { "message": "All tasks are in the allow list of trusted tasks" },
+                    "error": {
+                        "message": "Untrusted task found",
+                        "guidance": "At least one task was not found in the allowed tasklist"
+                    }
+                },
             ]
         }
     ]
