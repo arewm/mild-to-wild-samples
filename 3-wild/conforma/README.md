@@ -8,27 +8,55 @@ Like medium, verification requires two passes because the base image and built i
 
 ## Usage
 
-Pass 1 — Verify the base image (same as mild):
+Run the demo script from the repo root:
 
 ```bash
-cosign verify \
-  --key 1-mild/conforma/cosign-release.pub \
-  --insecure-ignore-tlog \
-  <BASE_IMAGE_REF>
+./3-wild/conforma/verify.sh
+```
+
+The script performs the following steps via `generate-vsa.sh`:
+
+Pass 1 — Verify the base image release signature and provenance (same as mild):
+
+```bash
+ec validate image \
+  --images '{"components":[{"name":"base-image","containerImage":"<BASE_IMAGE_REF>"}]}' \
+  --public-key 1-mild/conforma/cosign-release.pub \
+  --ignore-rekor \
+  --policy '{"sources":[]}'
 
 ec validate image \
-  --image <BASE_IMAGE_REF> \
+  --images '{"components":[{"name":"base-image","containerImage":"<BASE_IMAGE_REF>"}]}' \
   --policy 1-mild/conforma/policy.yaml \
   --public-key 1-mild/conforma/cosign-provenance.pub \
-  --ignore-rekor
+  --ignore-rekor \
+  --skip-image-sig-check
 ```
 
-Pass 2 — Verify the built image with the wild [`policy.yaml`](policy.yaml):
+Pass 2 — Verify the built image with the wild policy (key-based, Tekton Chains):
 
 ```bash
 ec validate image \
-  --image <BUILT_IMAGE_REF> \
+  --images '{"components":[{"name":"built-image","containerImage":"<BUILT_IMAGE_REF>"}]}' \
   --policy 3-wild/conforma/policy.yaml \
-  --public-key 3-wild/conforma/cosign-chains.pub \
+  --public-key provenance.pub \
   --ignore-rekor
 ```
+
+## VSA Generation
+
+The `scripts/generate-vsa.sh` script runs both passes and generates a SLSA VSA:
+
+```bash
+scripts/generate-vsa.sh \
+  --image <BUILT_IMAGE_REF> \
+  --policy 3-wild/conforma/policy.yaml \
+  --public-key provenance.pub \
+  --ignore-rekor \
+  --base-image-policy 1-mild/conforma/policy.yaml \
+  --base-image-key 1-mild/conforma/cosign-provenance.pub \
+  --base-image-release-key 1-mild/conforma/cosign-release.pub \
+  --vsa-signing-key vsa.key
+```
+
+Use `--no-attach` to produce the VSA predicate without pushing it to the registry.

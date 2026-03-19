@@ -22,10 +22,14 @@ spec:
       ruleData:
         allowed_builder_ids:
           - "https://github.com/arewm/mild-to-wild-samples/tekton-build"
-          - "https://github.com/puerco/mild-to-wild-samples/.github/workflows/build-push.yaml@refs/heads/main"
+          - "https://github.com/arewm/mild-to-wild-samples/.github/workflows/build-push.yaml@refs/heads/main"
         allowed_build_types:
           - "https://tekton.dev/chains/v2/slsa"
           - "https://actions.github.io/buildtypes/workflow/v1"
+        allowed_gh_workflow_repos:
+          - "arewm/mild-to-wild-samples"
+        allowed_gh_workflow_refs:
+          - "refs/heads/main"
       config:
         include:
           # Mild rules
@@ -37,3 +41,5 @@ spec:
           - slsa_source_version_controlled.materials_uri_is_git_repo
           - slsa_source_version_controlled.materials_include_git_sha
           - external_parameters.restrict_shared_volumes
+          # GitHub Actions certificate checks
+          - github_certificate

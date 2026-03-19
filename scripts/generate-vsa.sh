@@ -18,9 +18,10 @@
 #     [--ignore-rekor]                  # skip Rekor for built image
 #     [--base-image-policy POLICY]      # base image policy (default: 1-mild/conforma/policy.yaml)
 #     [--base-image-key KEY]            # base image provenance key
-#     [--base-image-release-key KEY]    # base image release signature key (cosign verify)
+#     [--base-image-release-key KEY]    # base image release signature key
 #     [--skip-base-image]               # skip base image verification
 #     [--report FILE]                   # reuse existing report (skip built image validation)
+#     [--report-dir DIR]                # write ec JSON reports here (base-report.json, built-report.json)
 #     [--output FILE]                   # write predicate JSON here
 #     [--no-attach]                     # skip cosign attest (just produce predicate)
 #     [--tlog-upload]                   # upload attestation to Rekor (default: skip)
@@ -54,6 +55,7 @@ BASE_IMAGE_KEY=""
 BASE_IMAGE_RELEASE_KEY=""
 SKIP_BASE_IMAGE=false
 REPORT=""
+REPORT_DIR=""
 OUTPUT=""
 NO_ATTACH=false
 TLOG_UPLOAD=false
@@ -79,6 +81,7 @@ while [[ $# -gt 0 ]]; do
     --base-image-release-key) BASE_IMAGE_RELEASE_KEY="$2"; shift 2 ;;
     --skip-base-image)        SKIP_BASE_IMAGE=true; shift ;;
     --report)                 REPORT="$2"; shift 2 ;;
+    --report-dir)             REPORT_DIR="$2"; shift 2 ;;
     --output)                 OUTPUT="$2"; shift 2 ;;
     --no-attach)              NO_ATTACH=true; shift ;;
     --tlog-upload)            TLOG_UPLOAD=true; shift ;;
@@ -98,6 +101,16 @@ done
 if [[ "$NO_ATTACH" == false && -z "$VSA_SIGNING_KEY" ]]; then
   echo "Error: --vsa-signing-key is required unless --no-attach is set" >&2
   usage
+fi
+
+# Resolve report file paths
+if [[ -n "$REPORT_DIR" ]]; then
+  mkdir -p "$REPORT_DIR"
+  BASE_REPORT="${REPORT_DIR}/base-report.json"
+  : "${REPORT:=${REPORT_DIR}/built-report.json}"
+else
+  BASE_REPORT=$(mktemp /tmp/vsa-base-report.XXXXXXXX).json
+  : "${REPORT:=$(mktemp /tmp/vsa-report.XXXXXXXX).json}"
 fi
 
 # --- Helpers ---
@@ -170,36 +183,41 @@ else
   BASE_REF="${BASE_NAME%%:*}@${BASE_DIGEST}"
   echo "--- Pass 1: Verifying base image ${BASE_REF}"
 
-  # Step 1a: Verify release signature (if key provided)
+  # Verify base image release signature (if key provided)
   if [[ -n "$BASE_IMAGE_RELEASE_KEY" ]]; then
     echo "  Verifying release signature..."
-    cosign verify \
-      --key "$BASE_IMAGE_RELEASE_KEY" \
-      --insecure-ignore-tlog \
-      "$BASE_REF" > /dev/null 2>&1
+    "$EC_BIN" validate image \
+      --images '{"components":[{"name":"base-image","containerImage":"'"$BASE_REF"'"}]}' \
+      --public-key "$BASE_IMAGE_RELEASE_KEY" \
+      --ignore-rekor \
+      --policy '{"sources":[]}' 2>/dev/null
     echo "  Release signature: OK"
   fi
 
-  # Step 1b: Verify provenance (if policy and key provided)
+  # Verify base image provenance (if policy and key provided)
   if [[ -n "$BASE_IMAGE_POLICY" && -n "$BASE_IMAGE_KEY" ]]; then
     echo "  Verifying provenance..."
     "$EC_BIN" validate image \
-      --image "$BASE_REF" \
+      --images '{"components":[{"name":"base-image","containerImage":"'"$BASE_REF"'"}]}' \
       --policy "$BASE_IMAGE_POLICY" \
       --public-key "$BASE_IMAGE_KEY" \
       --ignore-rekor \
-      --output "json=/tmp/vsa-base-report.json" 2>/dev/null
+      --skip-image-sig-check \
+      --show-successes \
+      --output 'text?show-successes=false' \
+      --output "json=${BASE_REPORT}" 2>/dev/null
+    jq . "$BASE_REPORT" > "${BASE_REPORT}.tmp" && mv "${BASE_REPORT}.tmp" "$BASE_REPORT"
 
     BASE_RESULT=$(jq -r '
       if (.components // [] | length) == 0 then "FAILED"
       elif [.components[] | select((.violations // .failures // []) | length > 0)] | length > 0 then "FAILED"
       else "PASSED"
       end
-    ' /tmp/vsa-base-report.json)
+    ' "$BASE_REPORT")
 
     if [[ "$BASE_RESULT" != "PASSED" ]]; then
       echo "  Base image provenance verification FAILED" >&2
-      jq '.components[] | .violations // .failures // []' /tmp/vsa-base-report.json >&2
+      jq '.components[] | .violations // .failures // []' "$BASE_REPORT" >&2
       exit 1
     fi
     echo "  Provenance: OK"
@@ -210,17 +228,17 @@ fi
 
 # --- Pass 2: Verify built image ---
 
-if [[ -n "$REPORT" && -f "$REPORT" ]]; then
+if [[ -f "$REPORT" ]]; then
   echo "--- Using existing report: $REPORT"
 else
   echo "--- Pass 2: Verifying built image"
-  REPORT=$(mktemp /tmp/vsa-report.XXXXXX.json)
 
   EC_ARGS=(
     validate image
-    --image "$IMAGE_REF"
+    --images '{"components":[{"name":"built-image","containerImage":"'"$IMAGE_REF"'"}]}'
     --policy "$POLICY"
     --show-successes
+    --output 'text?show-successes=false'
     --output "json=${REPORT}"
   )
 
@@ -245,6 +263,7 @@ else
   fi
 
   "$EC_BIN" "${EC_ARGS[@]}" 2>/dev/null
+  jq . "$REPORT" > "${REPORT}.tmp" && mv "${REPORT}.tmp" "$REPORT"
 fi
 
 # --- Check result ---
@@ -306,17 +325,14 @@ PREDICATE=$(jq -n \
     slsaVersion: "1.0"
   }')
 
-PREDICATE_FILE="${OUTPUT:-$(mktemp /tmp/vsa-predicate.XXXXXX.json)}"
-echo "$PREDICATE" > "$PREDICATE_FILE"
+PREDICATE_FILE="${OUTPUT:-$(mktemp /tmp/vsa-predicate.XXXXXXXX).json}"
+echo "$PREDICATE" | jq . > "$PREDICATE_FILE"
 
-echo ""
-echo "=== VSA predicate ==="
-jq . "$PREDICATE_FILE"
+echo "  VSA written to $PREDICATE_FILE"
 
 # --- Attach VSA to image ---
 
 if [[ "$NO_ATTACH" == true ]]; then
-  echo "Predicate written to $PREDICATE_FILE (not attached)"
   exit 0
 fi
 
