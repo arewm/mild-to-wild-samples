@@ -11,3 +11,12 @@ ampel verify "$(crane manifest ghcr.io/puerco/mild-to-wild-samples | jq -r '.ann
    --attest-format vsa \
    --attest-results=true \
    --results-path=output/base.vsa.json
+
+ampel verify $(crane digest  ghcr.io/puerco/mild-to-wild-samples) \
+    -c oci:ghcr.io/puerco/mild-to-wild-samples \
+    -p 2-medium/ampel/verify-build.hjson \
+    -a output/base.vsa.json \
+    --attest-format vsa \
+    --attest-results=true \
+    --results-path=output/image.vsa.json
+    
