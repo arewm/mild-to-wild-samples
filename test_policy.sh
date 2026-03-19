@@ -48,7 +48,8 @@ run_test() {
 
     paths+=("${SCRIPT_DIR}/${dir}/conforma/")
 
-    "${EC_BIN}" opa test "${paths[@]}" -v
+    # Run only our tests (filter out upstream lib tests)
+    "${EC_BIN}" opa test "${paths[@]}" -v --run "^data\.(mild|medium|wild)_test\."
 }
 
 if [[ $# -eq 0 ]]; then
