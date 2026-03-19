@@ -44,7 +44,7 @@ test_taskrun_trusted_ref_pass if {
 test_taskrun_untrusted_ref_warns if {
 	trusted_task_refs := [{"uri": "git+https://github.com/arewm/mild-to-wild-samples", "digest": {"sha1": "abc123"}}]
 	expected := {{
-		"code": "wild.all_tasks_trusted",
+		"code": "wild.all_task_refs_trusted",
 		"msg": "Untrusted task found: git+https://github.com/other/repo",
 	}}
 	lib.assert_equal_results(wild.warn, expected) with input.attestations as [_mock_taskrun_v1("git+https://github.com/other/repo", "def456")]
@@ -56,7 +56,7 @@ test_taskrun_untrusted_ref_warns if {
 test_taskrun_wrong_digest_warns if {
 	trusted_task_refs := [{"uri": "git+https://github.com/arewm/mild-to-wild-samples", "digest": {"sha1": "abc123"}}]
 	expected := {{
-		"code": "wild.all_tasks_trusted",
+		"code": "wild.all_task_refs_trusted",
 		"msg": "Untrusted task found: git+https://github.com/arewm/mild-to-wild-samples",
 	}}
 	lib.assert_equal_results(wild.warn, expected) with input.attestations as [_mock_taskrun_v1("git+https://github.com/arewm/mild-to-wild-samples", "wrong")]

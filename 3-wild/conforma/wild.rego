@@ -47,12 +47,12 @@ warn contains result if {
 }
 
 # METADATA
-# title: All task bundles are trusted
+# title: All resolved task refs are trusted
 # description: >-
 #   For TaskRun provenance (SLSA v1), checks the resolved task
 #   dependency against trusted_task_refs rule data.
 # custom:
-#   short_name: all_tasks_trusted
+#   short_name: all_task_refs_trusted
 #   failure_msg: "Untrusted task found: %s"
 #   solution: >-
 #     Ensure the task reference is listed in the trusted_task_refs

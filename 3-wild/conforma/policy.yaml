@@ -47,4 +47,5 @@ spec:
           - external_parameters.restrict_shared_volumes
           # Wild rules
           - wild.all_tasks_trusted
+          - wild.all_task_refs_trusted
           - wild.pipelinerun_provenance_for_trusted_tasks

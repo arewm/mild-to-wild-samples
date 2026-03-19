@@ -60,3 +60,13 @@ scripts/generate-vsa.sh \
 ```
 
 Use `--no-attach` to produce the VSA predicate without pushing it to the registry.
+
+## Why custom rules instead of the upstream `trusted_task` package?
+
+Conforma's standard library includes a full `trusted_task` package (`trusted_task.trusted`, `trusted_task.pinned`, etc.) that handles both PipelineRun bundle refs and TaskRun git resolver refs. It supports pattern-based allow/deny lists with version constraints, effective dates, and proper git URL normalization. In production, this is what you'd use.
+
+The custom `wild.rego` rules in this demo exist for two reasons:
+
+1. **Warn instead of deny.** The upstream `trusted_task.trusted` is a `deny` rule — policy evaluation fails if an untrusted task is found. Our custom rules use `warn` instead, so the policy always passes. The presence or absence of warnings is what determines whether the VSA claims L2 or L3. This lets a single policy evaluation produce a graded result rather than a binary pass/fail.
+
+2. **Simplicity for the demo.** The upstream package includes additional checks (pinned refs, tagged refs, version currency, trusted parameters, trusted artifacts) that are valuable in production but add complexity for a conference demo. The custom rules isolate the core concept: match task refs against an allowlist, warn if untrusted.

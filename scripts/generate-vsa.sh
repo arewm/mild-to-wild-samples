@@ -148,8 +148,8 @@ determine_level() {
   jq -r "
     ${component_selector} |
     if (
-      ([(.successes // [])[] | select(.metadata.code == \"wild.all_tasks_trusted\")] | length > 0) and
-      ([(.warnings // [])[]  | select(.metadata.code == \"wild.all_tasks_trusted\" or .metadata.code == \"wild.pipelinerun_provenance_for_trusted_tasks\")] | length == 0)
+      ([(.successes // [])[] | select(.metadata.code == \"wild.all_tasks_trusted\" or .metadata.code == \"wild.all_task_refs_trusted\")] | length > 0) and
+      ([(.warnings // [])[]  | select(.metadata.code == \"wild.all_tasks_trusted\" or .metadata.code == \"wild.all_task_refs_trusted\" or .metadata.code == \"wild.pipelinerun_provenance_for_trusted_tasks\")] | length == 0)
     )
     then \"SLSA_BUILD_LEVEL_3\"
     else \"SLSA_BUILD_LEVEL_2\"
