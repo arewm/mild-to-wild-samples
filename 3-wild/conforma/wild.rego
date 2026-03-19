@@ -71,7 +71,7 @@ warn contains result if {
 	some dep in att.statement.predicate.buildDefinition.resolvedDependencies
 	dep.name == "task"
 
-	trusted := lib.rule_data("trusted_task_refs")
+	trusted := data.trusted_task_refs
 	not _is_trusted_task_ref(dep, trusted)
 
 	result := lib.result_helper(rego.metadata.chain(), [dep.uri])
