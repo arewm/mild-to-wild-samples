@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-BUILT_IMAGE="${BUILT_IMAGE:-quay.io/arewm/mild-to-wild-samples:build-20260314-021538}"
+BUILT_IMAGE="${BUILT_IMAGE:-quay.io/arewm/mild-to-wild-samples:build-20260319-164911}"
 
 echo ""
 echo "=== Wild: Verifying image with trusted task checks ==="
