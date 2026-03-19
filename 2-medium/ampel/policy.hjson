@@ -1,44 +1,184 @@
 {
-    // Medium: provenance content inspection and SBOM presence
-    id: medium-policy
-    version: "1"
+    id: set-image-verification
+    meta: {
+        description: 
+'''
+# Medium: Image Verification Policy Set
 
+Ensures an image matches a SLSA level in its build process and ensures its
+dependencies are also SLSA verified.
+
+## Purpose
+
+This PolicySet verifies the SLSA build attestation of our container image.
+It also verifies its dependencies according to the SLSA spec. In this case the
+only dependency is its base image.
+
+This set has four policies. The first three verify the build provenance of our
+built image.
+
+The fourth chains our image's build provenance to the base image verification
+summary or "VSA".  This is a summary of the verification we did on our base
+image's provenance attestation.
+
+When running in AMPEL, this policy can generate a verification summary (VSAs)
+for our built image (--format=vsa is your friend). End users can use the VSA
+to quickly validate the checks we did without analyzing all the previous
+attestations and rerunning the policies.
+'''
+        frameworks: [
+            {
+                id: "SLSA",
+                name: "Supply-Chain Levels for Software Artifacts"
+            }
+        ]
+    },
+    common: {
+        context: {
+            // buildPoint captures the build point base. This value can be
+            // pinned to a commit but since it is "baked" in the policy code
+            // we define the VCS locator of the repo without a commit to match
+            // the repo on any revision.
+            buildPoint: {
+                value: "git+https://github.com/puerco/mild-to-wild-samples"
+            },
+            // Builder ID is set to the repository workflow URL.
+            builderId: {
+                value: "https://github.com/puerco/mild-to-wild-samples/.github/workflows/build-push.yaml@refs/heads/main"
+            },
+            // The build type specifies we are using github actions. 
+            buildType: {
+                value: "https://actions.github.io/buildtypes/workflow/v1"
+            }
+        },
+        
+    },
+    // The first three policies verify the provenance atteatstion of the image.
+    // We check that they were built by the CI in our repo.
     policies: [
         {
-            id: content-checks
-            version: v0.0.1
-
-            meta: {
-                description: "Inspect provenance content and verify SBOM presence"
-                runtime: cel@v0
-            }
-
-            tenets: [
-                {
-                    // Verify the artifact was built from the main branch
-                    id: trusted-source-branch
-                    runtime: cel@v0
-                    code: '''
-                        predicates.exists(p,
-                            p.data.buildDefinition.externalParameters.source.ref == "refs/heads/main"
-                        )
-                    '''
-
-                    predicates: {
-                        types: [https://slsa.dev/provenance/v1]
-                    }
+            // Verify the builder was done in our repository
+            id: "slsa-builder-id",
+            source: {
+                location: { uri: "git+https://github.com/carabiner-dev/policies#slsa/slsa-builder-id.json" }
+            },
+            meta: { controls: [ { framework: "SLSA", class: "BUILD", id: "LEVEL_2" } ] },
+            identities: [
+            {
+                // The signer identity is the workload identity of this repository.
+                // it uses a regexp to allow the policy to work on forks
+                sigstore: {
+                    mode: "regexp",
+                    issuer: "https://token.actions.githubusercontent.com",
+                    identity: "https://github.com/[-a-z]+/mild-to-wild-samples/.github/workflows/build-push.yaml@refs/heads/main",
                 }
+            }
+            ]
+        },
+        {
+            // Ensure our image was built on GitHub actions.
+            id: "slsa-build-type",
+            source: {
+                location: { "uri": "git+https://github.com/carabiner-dev/policies#slsa/slsa-build-type.json" }
+            },
+            meta: { controls: [ { framework: "SLSA", class: "BUILD", id: "LEVEL_2" } ] },
+            identities: [
                 {
-                    // Verify a CycloneDX SBOM attestation is present
-                    id: sbom-present
-                    runtime: cel@v0
-                    code: "size(predicates) > 0"
-
-                    predicates: {
-                        types: [https://cyclonedx.org/bom]
+                    sigstore: {
+                        mode: "regexp",
+                        issuer: "https://token.actions.githubusercontent.com",
+                        identity: "https://github.com/[-a-z]+/mild-to-wild-samples/.github/workflows/build-push.yaml@refs/heads/main",
                     }
                 }
             ]
+        },
+        {
+            // This policy verifies that the image was built from the specific
+            // repository and optionally a commit. 
+            id: "slsa-build-point",
+            source: {
+                location: { uri: "git+https://github.com/carabiner-dev/policies#slsa/slsa-build-point.json" }
+            },
+            meta: {
+                controls: [ { framework: "SLSA", class: "BUILD", id: "LEVEL_2" } ],
+                enforce: ON
+            },
+            identities: [
+                {
+                    sigstore: {
+                        mode: "regexp",
+                        issuer: "https://token.actions.githubusercontent.com",
+                        identity: "https://github.com/[-a-z]+/mild-to-wild-samples/.github/workflows/build-push.yaml@refs/heads/main",
+                    }
+                }
+            ]
+        },
+        {
+            // Verify the base image SLSA level.
+            //
+            // As we already did the full verification, this step checks the VSA
+            // of the base image verification to ensure it is SLSA Level 2.
+            // The VSA provides the summary of the base image verification results. 
+            // 
+            // Since AMPEL is verifying the build image (not the base), we need
+            // to chain the predicates to find the VSA, the chain looks like this:
+            //
+            //   ampel verify  subject  >  Provenance (SLSA v1) > new subject
+            //               (built image)   -- dependency ->     (base image)
+            //                               -- selector   -> 
+            //
+            // By applying a selector to our image's build provenance, we can find
+            // the digest of its base image and the collector can look for its VSA. 
+            //
+            id: verify-base-image
+            source: {
+                location: { uri: "git+https://github.com/carabiner-dev/policies#vsa/slsa-build-level2.json" }
+            },
+            context: {
+                // This is the base image reference
+                baseImage: {
+                    required: true,
+                    type: "string",
+                    default: registry.access.redhat.com/ubi10/ubi-minimal
+                }
+            },
+            chain: [
+                {
+                    // Same as above, we chain the build provenance to extract
+                    // the digest of the image. 
+                    predicate: {
+                        type: "https://slsa.dev/provenance/v1",
+                        
+                        // The selector queries the resolvedDependencies in our
+                        // built image's provenance to look for the base image
+                        // digest, which in turn becomes the new subject and we
+                        // then can look for its VSA.
+                        selector: '''
+                            has(predicate.data.buildDefinition) ? (
+                                has(predicate.data.buildDefinition.resolvedDependencies) ? (
+                                    predicate.data.buildDefinition.resolvedDependencies.map(dep, dep.uri.startsWith(context.baseImage ), "sha256:" + dep.digest["sha256"])[0]
+                                ) : '' 
+                            ) : ''
+                        '''
+                    }
+                }
+            ],
+            //
+            // As we are doing a demo with an unsigned VSA for the chain, here we
+            // cannot verify the attestation identity as this would enforce signature
+            // verification in the chained predicates.
+            //
+            // If you are chaining with signed attestations, then you can uncomment
+            // the identities to verify the signer.
+            //
+            // identities:[
+            //     {
+            //         sigstore: {
+            //             issuer: "https://token.actions.githubusercontent.com",
+            //             identity: "https://github.com/slsa-framework/source-actions/.github/workflows/compute_slsa_source.yml@refs/heads/main"
+            //         }
+            //     }
+            // ]
         }
     ]
 }
