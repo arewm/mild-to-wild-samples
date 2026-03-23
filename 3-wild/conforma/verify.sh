@@ -15,6 +15,8 @@ echo "  Base image:  1-mild/conforma/policy.yaml"
 echo "  Built image: 3-wild/conforma/policy.yaml"
 echo "  Trusted tasks: 3-wild/conforma/data/trusted-tasks.yaml"
 
+rm -rf output/wild/conforma
+
 scripts/generate-vsa.sh \
   --image "${BUILT_IMAGE}" \
   --policy 3-wild/conforma/policy.yaml \
