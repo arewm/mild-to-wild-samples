@@ -5,6 +5,7 @@ set -euo pipefail
 
 BASE_IMAGE="${BASE_IMAGE:-registry.access.redhat.com/ubi10/ubi-minimal:latest}"
 
+rm -rf output/mild/conforma
 mkdir -p output/mild/conforma
 
 echo ""

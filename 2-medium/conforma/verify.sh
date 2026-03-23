@@ -30,6 +30,8 @@ else
   )
 fi
 
+rm -rf output/medium/conforma
+
 scripts/generate-vsa.sh \
   --image "${BUILT_IMAGE}" \
   --policy 2-medium/conforma/policy.yaml \
