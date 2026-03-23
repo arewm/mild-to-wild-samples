@@ -25,6 +25,7 @@
 #     [--output FILE]                   # write predicate JSON here
 #     [--no-attach]                     # skip cosign attest (just produce predicate)
 #     [--tlog-upload]                   # upload attestation to Rekor (default: skip)
+#     [--policy-uri URI]                # policy URI for VSA (default: git-resolved)
 #     [--extra-ec-args ARGS]            # additional args for ec validate
 #
 # Requires: jq, ec, cosign, and one of: crane, skopeo
@@ -59,6 +60,7 @@ REPORT_DIR=""
 OUTPUT=""
 NO_ATTACH=false
 TLOG_UPLOAD=false
+POLICY_URI=""
 EXTRA_EC_ARGS=""
 
 usage() {
@@ -85,6 +87,7 @@ while [[ $# -gt 0 ]]; do
     --output)                 OUTPUT="$2"; shift 2 ;;
     --no-attach)              NO_ATTACH=true; shift ;;
     --tlog-upload)            TLOG_UPLOAD=true; shift ;;
+    --policy-uri)             POLICY_URI="$2"; shift 2 ;;
     --extra-ec-args)          EXTRA_EC_ARGS="$2"; shift 2 ;;
     -h|--help)                usage ;;
     *)                        echo "Unknown option: $1" >&2; usage ;;
@@ -295,6 +298,21 @@ if [[ -n "$BASE_NAME" && -n "$BASE_DIGEST" && "$SKIP_BASE_IMAGE" != true ]]; the
   echo "  Base image: ${BASE_REF} -> $BASE_LEVEL"
 fi
 
+# --- Resolve policy URI ---
+
+if [[ -z "$POLICY_URI" ]]; then
+  REMOTE_URL=$(git config --get remote.origin.url 2>/dev/null || true)
+  COMMIT_SHA=$(git rev-parse HEAD 2>/dev/null || true)
+  if [[ -n "$REMOTE_URL" && -n "$COMMIT_SHA" ]]; then
+    # Normalize SSH/git URLs to https
+    REPO_URL="${REMOTE_URL%.git}"
+    REPO_URL="${REPO_URL/#git@github.com:/https://github.com/}"
+    POLICY_URI="${REPO_URL}/blob/${COMMIT_SHA}/${POLICY}"
+  else
+    POLICY_URI="$POLICY"
+  fi
+fi
+
 # --- Generate VSA predicate ---
 
 EC_VERSION=$(jq -r '."ec-version" // "unknown"' "$REPORT")
@@ -308,7 +326,7 @@ PREDICATE=$(jq -n \
   --arg ec_version "$EC_VERSION" \
   --arg time_verified "$TIME_VERIFIED" \
   --arg resource_uri "$IMAGE_REF" \
-  --arg policy_uri "$POLICY" \
+  --arg policy_uri "$POLICY_URI" \
   --arg level "$BUILT_LEVEL" \
   --argjson deps "$DEPS" \
   '{
