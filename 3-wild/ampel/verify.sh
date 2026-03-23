@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+set -x
 
 IMAGE="quay.io/arewm/mild-to-wild-samples:build-20260314-021538"
 
@@ -13,7 +14,7 @@ else
   AMPEL="../carabiner/ampel/ampel"
 fi
 
-mkdir -p output 2>/dev/null
+mkdir -p output/wild/ampel/ 2>/dev/null
 
 echo ""
 echo "Dowloading trusted tasks..."
@@ -31,7 +32,7 @@ echo "Verifying base image (to VSA)"
    --context 'buildPoint:git+https://gitlab.com/redhat/rhel/containers/ubi10-minimal.git' \
    --attest-format vsa \
    --attest-results=true \
-   --results-path=output/tekton-base.vsa.json
+   --results-path=output/wild/ampel/tekton-base.vsa.json
 
 echo ""
 echo "Verifying image and trusted tasks..."
@@ -39,10 +40,10 @@ echo "Verifying image and trusted tasks..."
 "$AMPEL" verify "$(crane digest ${IMAGE})" \
     --collector coci:${IMAGE} \
     --policy 3-wild/ampel/policy.hjson \
-    --attestation output/tekton-base.vsa.json \
+    --attestation output/wild/ampel/tekton-base.vsa.json \
     --context "baseDigest:$(crane manifest ${IMAGE} | jq -r '.annotations["org.opencontainers.image.base.digest"]')" \
     --context-yaml @/tmp/required_tasks.yml \
     --attest-format vsa \
     --attest-results=true \
-    --results-path=output/tekton-image.vsa.json
+    --results-path=output/wild/ampel/tekton-image.vsa.json
     
